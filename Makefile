@@ -1,4 +1,4 @@
-.PHONY: run build test generate db-up db-down clean help
+.PHONY: run build test generate verify db-up db-down db-reset db-migrate db-shell docker-build docker-run setup frontend clean help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -7,7 +7,7 @@ help: ## Show this help
 # SQLC
 # ============================================================================
 
-generate: ## Generate Go code from SQL (requires: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest)
+generate: ## Generate Go code from SQL
 	sqlc generate
 
 verify: ## Verify sqlc configuration
@@ -36,14 +36,14 @@ db-up: ## Start PostgreSQL
 db-down: ## Stop PostgreSQL
 	docker-compose down
 
-db-reset: ## Reset database
+db-reset: ## Reset database (drops volumes)
 	docker-compose down -v
 	docker-compose up -d postgres
 	sleep 3
 	@echo "Database reset complete"
 
 db-migrate: ## Run migrations
-	docker exec -i postgres-db psql -U postgres -d postgres < migrations/001_schema.sql
+	go run ./cmd/migrate/main.go
 
 db-shell: ## Open psql shell
 	docker exec -it postgres-db psql -U postgres -d postgres
@@ -53,26 +53,33 @@ db-shell: ## Open psql shell
 # ============================================================================
 
 docker-build: ## Build Docker image
-	docker build -t postgres:latest .
+	docker build -t cinema-app:latest .
 
 docker-run: ## Run with Docker Compose
 	docker-compose up --build
 
 # ============================================================================
+# Frontend
+# ============================================================================
+
+frontend: ## Build React frontend into static/
+	cd frontend && npm install && npm run build
+
+# ============================================================================
 # Setup
 # ============================================================================
 
-setup: ## Install dependencies
+setup: ## Install all dependencies
 	go mod download
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-	@echo "✓ Dependencies installed"
-	@echo "✓ sqlc installed"
+	cd frontend && npm install
+	@echo "Dependencies installed"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. make db-up      # Start PostgreSQL"
-	@echo "  2. make db-migrate # Create tables"
-	@echo "  3. make generate   # Generate sqlc code"
-	@echo "  4. make run        # Start server"
+	@echo "  2. make db-migrate # Apply schema"
+	@echo "  3. make frontend   # Build React app"
+	@echo "  4. make run        # Start server on :8080"
 
 clean: ## Clean build artifacts
 	rm -rf bin/
