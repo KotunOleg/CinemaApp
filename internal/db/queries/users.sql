@@ -1,39 +1,23 @@
 -- name: GetUser :one
-SELECT * FROM users WHERE id = $1;
+SELECT * FROM users WHERE user_id = $1;
+
+-- name: ListUsers :many
+SELECT * FROM users ORDER BY user_id LIMIT $1 OFFSET $2;
 
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = $1;
 
--- name: ListUsers :many
-SELECT * FROM users 
-WHERE active = COALESCE(sqlc.narg('active'), active)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2;
-
--- name: CountUsers :one
-SELECT COUNT(*) FROM users WHERE active = COALESCE(sqlc.narg('active'), active);
-
 -- name: CreateUser :one
-INSERT INTO users (name, email, password_hash)
-VALUES ($1, $2, $3)
+INSERT INTO users (email, password_hash, phone, full_name, permission_level)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateUser :one
-UPDATE users 
-SET name = COALESCE(sqlc.narg('name'), name),
-    email = COALESCE(sqlc.narg('email'), email),
+UPDATE users
+SET email = $2, phone = $3, full_name = $4, is_blocked = $5, permission_level = $6,
     updated_at = CURRENT_TIMESTAMP
-WHERE id = $1
+WHERE user_id = $1
 RETURNING *;
 
--- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1;
-
--- name: DeactivateUser :exec
-UPDATE users SET active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1;
-
 -- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1;
-
--- name: UserExists :one
-SELECT EXISTS(SELECT 1 FROM users WHERE email = $1);
+DELETE FROM users WHERE user_id = $1;
