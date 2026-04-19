@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api, downloadFile } from '../api/client'
 import EntityPage from '../components/EntityPage'
 
 const statusBadge = (status) => {
@@ -76,6 +76,11 @@ export default function TicketsPage() {
       remove={remove}
       fields={fields}
       defaultValues={defaultValues}
+      extraActions={
+        <button className="btn btn-success btn-sm" onClick={() => downloadFile('/api/tickets/export', 'tickets.xlsx')}>
+          <i className="bi bi-file-earmark-excel me-1" />Export Excel
+        </button>
+      }
     />
   )
 }

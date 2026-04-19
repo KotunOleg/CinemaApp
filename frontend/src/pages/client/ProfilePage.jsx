@@ -1,52 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { api, downloadFile } from '../../api/client'
 import { useAuth } from '../../context/AuthContext'
+import { api } from '../../api/client'
 
 function formatTime(ts) {
   if (!ts) return '—'
   try { return new Date(ts).toLocaleString('uk-UA') } catch { return String(ts) }
-}
-
-function MoviesTab() {
-  const [movies, setMovies] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api.get('/api/movies?limit=100').then(setMovies).finally(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div className="text-center py-5"><div className="spinner-border text-warning" /></div>
-
-  return (
-    <>
-      <h5 className="fw-bold mb-4">Now Showing</h5>
-      {movies.length === 0 && <p className="text-muted">No movies available.</p>}
-      <div className="row g-4">
-        {movies.map((m) => (
-          <div className="col-sm-6 col-lg-4" key={m.movie_id}>
-            <Link to={`/browse/movies/${m.movie_id}`} className="text-decoration-none">
-              <div className="card h-100 shadow-sm border-0">
-                <div className="card-img-top d-flex align-items-center justify-content-center bg-dark text-warning" style={{ height: 160, fontSize: 48 }}>
-                  <i className="bi bi-film" />
-                </div>
-                <div className="card-body">
-                  <h6 className="card-title fw-bold text-dark">{m.title}</h6>
-                  <p className="text-muted small mb-1">{(m.genre || []).join(', ') || '—'}</p>
-                  <p className="text-muted small" style={{ fontSize: 12 }}>
-                    {(m.description || '').slice(0, 80)}{(m.description || '').length > 80 ? '…' : ''}
-                  </p>
-                </div>
-                <div className="card-footer bg-white border-0">
-                  <span className="btn btn-outline-warning btn-sm w-100">View Showtimes</span>
-                </div>
-              </div>
-            </Link>
-          </div>
-        ))}
-      </div>
-    </>
-  )
 }
 
 function ShowtimesTab() {
@@ -54,15 +12,19 @@ function ShowtimesTab() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/api/showtimes?limit=100').then((d) => setShowtimes(d || [])).finally(() => setLoading(false))
+    api.get('/api/showtimes?limit=100')
+      .then((data) => setShowtimes(data || []))
+      .finally(() => setLoading(false))
   }, [])
 
   if (loading) return <div className="text-center py-4"><div className="spinner-border text-warning" /></div>
 
   return (
     <>
-      <h5 className="fw-bold mb-3">Showtimes</h5>
-      {showtimes.length === 0 ? <p className="text-muted">No showtimes available.</p> : (
+      <h5 className="fw-bold mb-3">Upcoming Showtimes</h5>
+      {showtimes.length === 0 ? (
+        <p className="text-muted">No showtimes available.</p>
+      ) : (
         <div className="table-responsive">
           <table className="table table-hover align-middle">
             <thead className="table-light">
@@ -98,34 +60,41 @@ function TicketsTab() {
   const [sub, setSub] = useState('all')
 
   useEffect(() => {
-    api.get('/api/profile/tickets').then((d) => setTickets(d || [])).finally(() => setLoading(false))
+    api.get('/api/profile/tickets')
+      .then((data) => setTickets(data || []))
+      .finally(() => setLoading(false))
   }, [])
 
   if (loading) return <div className="text-center py-4"><div className="spinner-border text-warning" /></div>
 
   const now = new Date()
-  const future = tickets.filter((t) => t.start_time && new Date(t.start_time) > now)
-  const filtered = sub === 'future' ? future : tickets
+  const filtered = sub === 'future'
+    ? tickets.filter((t) => t.start_time && new Date(t.start_time) > now)
+    : tickets
 
   return (
     <>
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h5 className="fw-bold mb-0">My Tickets</h5>
-        <div className="d-flex gap-2 align-items-center">
-        <button className="btn btn-success btn-sm" onClick={() => downloadFile('/api/profile/tickets/export', 'my_tickets.xlsx')}>
-          <i className="bi bi-file-earmark-excel me-1" />Export Excel
-        </button>
         <div className="btn-group btn-group-sm">
-          <button className={`btn ${sub === 'all' ? 'btn-warning' : 'btn-outline-secondary'}`} onClick={() => setSub('all')}>
+          <button
+            className={`btn ${sub === 'all' ? 'btn-warning' : 'btn-outline-secondary'}`}
+            onClick={() => setSub('all')}
+          >
             All ({tickets.length})
           </button>
-          <button className={`btn ${sub === 'future' ? 'btn-warning' : 'btn-outline-secondary'}`} onClick={() => setSub('future')}>
-            Upcoming ({future.length})
+          <button
+            className={`btn ${sub === 'future' ? 'btn-warning' : 'btn-outline-secondary'}`}
+            onClick={() => setSub('future')}
+          >
+            Upcoming ({tickets.filter((t) => t.start_time && new Date(t.start_time) > now).length})
           </button>
         </div>
-        </div>
       </div>
-      {filtered.length === 0 ? <p className="text-muted">No tickets found.</p> : (
+
+      {filtered.length === 0 ? (
+        <p className="text-muted">No tickets found.</p>
+      ) : (
         <div className="d-flex flex-column gap-3">
           {filtered.map((t) => {
             const isFuture = t.start_time && new Date(t.start_time) > now
@@ -147,7 +116,11 @@ function TicketsTab() {
                     <span className={`badge ${t.payment_status === 'paid' ? 'bg-success' : t.payment_status === 'cancelled' ? 'bg-danger' : 'bg-warning text-dark'}`}>
                       {t.payment_status || 'pending'}
                     </span>
-                    {isFuture && <div className="mt-1"><span className="badge bg-info text-dark">Upcoming</span></div>}
+                    {isFuture && (
+                      <div className="mt-1">
+                        <span className="badge bg-info text-dark">Upcoming</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -211,6 +184,7 @@ function SettingsTab() {
   return (
     <>
       <h5 className="fw-bold mb-4">Settings</h5>
+
       <div className="card border-0 shadow-sm mb-4">
         <div className="card-body">
           <h6 className="fw-semibold mb-3">Change Name</h6>
@@ -218,8 +192,13 @@ function SettingsTab() {
           <form onSubmit={handleName}>
             <div className="mb-3">
               <label className="form-label">Full Name</label>
-              <input type="text" className="form-control" value={nameForm.full_name}
-                onChange={(e) => setNameForm({ full_name: e.target.value })} required />
+              <input
+                type="text"
+                className="form-control"
+                value={nameForm.full_name}
+                onChange={(e) => setNameForm({ full_name: e.target.value })}
+                required
+              />
             </div>
             <button type="submit" className="btn btn-warning" disabled={nameLoading}>
               {nameLoading ? 'Saving…' : 'Save Name'}
@@ -227,6 +206,7 @@ function SettingsTab() {
           </form>
         </div>
       </div>
+
       <div className="card border-0 shadow-sm">
         <div className="card-body">
           <h6 className="fw-semibold mb-3">Change Password</h6>
@@ -234,8 +214,13 @@ function SettingsTab() {
           <form onSubmit={handlePass}>
             <div className="mb-3">
               <label className="form-label">New Password</label>
-              <input type="password" className="form-control" value={passForm.password}
-                onChange={(e) => setPassForm({ ...passForm, password: e.target.value })} required />
+              <input
+                type="password"
+                className="form-control"
+                value={passForm.password}
+                onChange={(e) => setPassForm({ ...passForm, password: e.target.value })}
+                required
+              />
             </div>
             <div className="mb-3">
               <label className="form-label">Confirm Password</label>
@@ -243,7 +228,9 @@ function SettingsTab() {
                 type="password"
                 className={`form-control ${passForm.confirm && passForm.password !== passForm.confirm ? 'is-invalid' : ''}`}
                 value={passForm.confirm}
-                onChange={(e) => setPassForm({ ...passForm, confirm: e.target.value })} required />
+                onChange={(e) => setPassForm({ ...passForm, confirm: e.target.value })}
+                required
+              />
               {passForm.confirm && passForm.password !== passForm.confirm && (
                 <div className="invalid-feedback">Passwords do not match</div>
               )}
@@ -259,58 +246,58 @@ function SettingsTab() {
 }
 
 const TABS = [
-  { key: 'movies',    icon: 'film',              label: 'Movies' },
-  { key: 'showtimes', icon: 'calendar-event',    label: 'Showtimes' },
-  { key: 'tickets',   icon: 'ticket-perforated', label: 'Tickets' },
-  { key: 'settings',  icon: 'gear',              label: 'Settings' },
+  { key: 'showtimes', icon: 'calendar-event', label: 'Showtimes' },
+  { key: 'tickets', icon: 'ticket-perforated', label: 'Tickets' },
+  { key: 'settings', icon: 'gear', label: 'Settings' },
 ]
 
-export default function BrowsePage() {
+export default function ProfilePage() {
   const { user } = useAuth()
-  const [tab, setTab] = useState('movies')
-
-  const visibleTabs = user ? TABS : TABS.filter((t) => t.key === 'movies' || t.key === 'showtimes')
+  const [tab, setTab] = useState('showtimes')
 
   return (
-    <div className="d-flex min-vh-100" style={{ background: '#f8f9fa' }}>
-      {/* Sidebar */}
-      <div className="d-flex flex-column bg-white shadow-sm" style={{ width: 240, minWidth: 240 }}>
-        {user && (
-          <div className="text-center py-4 px-3 border-bottom">
-            <div className="rounded-circle bg-warning d-flex align-items-center justify-content-center mx-auto mb-2"
-              style={{ width: 64, height: 64, fontSize: 28 }}>
-              <i className="bi bi-person-fill text-dark" />
-            </div>
-            <div className="fw-bold">{user.full_name}</div>
-            <div className="text-muted small">{user.email}</div>
-          </div>
-        )}
-        <ul className="nav flex-column p-3 gap-1">
-          {visibleTabs.map(({ key, icon, label }) => (
-            <li key={key} className="nav-item">
-              <button
-                onClick={() => setTab(key)}
-                className={`btn w-100 text-start d-flex align-items-center gap-2 px-3 py-2 rounded ${
-                  tab === key
-                    ? 'btn-warning fw-semibold'
-                    : 'btn-light text-secondary'
-                }`}
-                style={{ fontSize: 15 }}
+    <div className="container py-5">
+      <div className="row g-4">
+        {/* Sidebar */}
+        <div className="col-md-3">
+          <div className="card border-0 shadow-sm">
+            <div className="card-body text-center py-4">
+              <div
+                className="rounded-circle bg-warning d-flex align-items-center justify-content-center mx-auto mb-2"
+                style={{ width: 64, height: 64, fontSize: 28 }}
               >
-                <i className={`bi bi-${icon} fs-5`} />
-                {label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+                <i className="bi bi-person-fill text-dark" />
+              </div>
+              <div className="fw-bold">{user?.full_name}</div>
+              <div className="text-muted small">{user?.email}</div>
+            </div>
+            <ul className="nav flex-column px-2 pb-3">
+              {TABS.map(({ key, icon, label }) => (
+                <li key={key} className="nav-item">
+                  <button
+                    className={`nav-link w-100 text-start ${tab === key ? 'active text-warning fw-semibold' : 'text-secondary'}`}
+                    style={{ background: 'none', border: 'none' }}
+                    onClick={() => setTab(key)}
+                  >
+                    <i className={`bi bi-${icon} me-2`} />
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
 
-      {/* Content */}
-      <div className="flex-grow-1 p-5" style={{ overflowY: 'auto' }}>
-        {tab === 'movies'    && <MoviesTab />}
-        {tab === 'showtimes' && <ShowtimesTab />}
-        {tab === 'tickets'   && <TicketsTab />}
-        {tab === 'settings'  && <SettingsTab />}
+        {/* Content */}
+        <div className="col-md-9">
+          <div className="card border-0 shadow-sm">
+            <div className="card-body p-4">
+              {tab === 'showtimes' && <ShowtimesTab />}
+              {tab === 'tickets' && <TicketsTab />}
+              {tab === 'settings' && <SettingsTab />}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

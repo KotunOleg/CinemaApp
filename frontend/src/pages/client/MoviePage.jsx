@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
+import { useAuth } from '../../context/AuthContext'
 
 function formatTime(ts) {
   if (!ts) return '—'
@@ -44,6 +45,7 @@ function StarPicker({ value, onChange }) {
 export default function MoviePage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [movie, setMovie] = useState(null)
   const [showtimes, setShowtimes] = useState([])
   const [reviews, setReviews] = useState([])
@@ -51,13 +53,13 @@ export default function MoviePage() {
 
   // Booking
   const [booking, setBooking] = useState(null)
-  const [bookForm, setBookForm] = useState({ user_id: '', seat_number: '' })
+  const [bookForm, setBookForm] = useState({ seat_number: '' })
   const [bookSubmitting, setBookSubmitting] = useState(false)
   const [bookSuccess, setBookSuccess] = useState(null)
   const [bookError, setBookError] = useState(null)
 
   // Review
-  const [reviewForm, setReviewForm] = useState({ user_id: '', rating: 0, content: '' })
+  const [reviewForm, setReviewForm] = useState({ rating: 0, content: '' })
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [reviewError, setReviewError] = useState(null)
 
@@ -83,13 +85,13 @@ export default function MoviePage() {
     try {
       await api.post('/api/tickets', {
         showtime_id: booking.showtime_id,
-        user_id: Number(bookForm.user_id),
+        user_id: user?.user_id,
         seat_number: bookForm.seat_number,
         payment_status: 'pending',
       })
       setBookSuccess(`Ticket booked! Seat ${bookForm.seat_number} — ${formatTime(booking.start_time)}`)
       setBooking(null)
-      setBookForm({ user_id: '', seat_number: '' })
+      setBookForm({ seat_number: '' })
     } catch (e) {
       setBookError(e.message)
     } finally {
@@ -103,12 +105,12 @@ export default function MoviePage() {
     setReviewError(null)
     try {
       await api.post('/api/reviews', {
-        user_id: Number(reviewForm.user_id),
+        user_id: user?.user_id,
         movie_id: Number(id),
         rating: reviewForm.rating,
         content: reviewForm.content,
       })
-      setReviewForm({ user_id: '', rating: 0, content: '' })
+      setReviewForm({ rating: 0, content: '' })
       await loadReviews()
     } catch (e) {
       setReviewError(e.message)
@@ -227,18 +229,6 @@ export default function MoviePage() {
           <form onSubmit={handleReview}>
             {reviewError && <div className="alert alert-danger py-2">{reviewError}</div>}
             <div className="mb-3">
-              <label className="form-label fw-semibold">Your User ID</label>
-              <input
-                type="number"
-                className="form-control"
-                placeholder="Enter your user ID"
-                value={reviewForm.user_id}
-                onChange={(e) => setReviewForm({ ...reviewForm, user_id: e.target.value })}
-                onFocus={(e) => e.target.select()}
-                required
-              />
-            </div>
-            <div className="mb-3">
               <label className="form-label fw-semibold">Rating</label>
               <div>
                 <StarPicker
@@ -284,18 +274,6 @@ export default function MoviePage() {
                     <i className="bi bi-clock me-1" />{formatTime(booking.start_time)}
                   </p>
                   {bookError && <div className="alert alert-danger py-2">{bookError}</div>}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Your User ID</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      placeholder="Enter your user ID"
-                      value={bookForm.user_id}
-                      onChange={(e) => setBookForm({ ...bookForm, user_id: e.target.value })}
-                      onFocus={(e) => e.target.select()}
-                      required
-                    />
-                  </div>
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Seat Number</label>
                     <input
