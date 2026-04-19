@@ -23,7 +23,7 @@ import (
 func loadEnv(filename string) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return // no .env file is fine
+		return
 	}
 	defer f.Close()
 
@@ -45,145 +45,138 @@ func loadEnv(filename string) {
 	}
 }
 
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func pathInt(r *http.Request, key string) (int32, error) {
+	n, err := strconv.Atoi(r.PathValue(key))
+	return int32(n), err
+}
+
+func queryInt(r *http.Request, key string, def int32) int32 {
+	v, err := strconv.Atoi(r.URL.Query().Get(key))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return int32(v)
+}
+
 func main() {
 	loadEnv(".env")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Connect to database
 	cfg := database.ConfigFromEnv()
 	pool, err := database.New(ctx, cfg)
 	if err != nil {
 		log.Fatalf("Database connection failed: %v", err)
 	}
 	defer pool.Close()
-	log.Println("✓ Connected to PostgreSQL")
+	log.Println("Connected to PostgreSQL")
 
-	// Create sqlc queries instance
-	queries := db.New(pool)
-
-	// Setup routes
+	q := db.New(pool)
 	mux := http.NewServeMux()
 
-	// Health check
+	// Health
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(database.Health(pool))
+		writeJSON(w, http.StatusOK, database.Health(pool))
 	})
 
 	// =========================================================================
-	// User endpoints (demonstrating sqlc type safety)
+	// Cinemas
 	// =========================================================================
 
-	// List users
-	mux.HandleFunc("GET /api/users", func(w http.ResponseWriter, r *http.Request) {
-		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		if limit <= 0 {
-			limit = 20
-		}
-		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-		// Type-safe! Compiler checks all fields
-		users, err := queries.ListUsers(r.Context(), db.ListUsersParams{
-			Active: pgtype.Bool{Valid: false}, // NULL = all users
-			Limit:  int32(limit),
-			Offset: int32(offset),
+	mux.HandleFunc("GET /api/cinemas", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListCinemas(r.Context(), db.ListCinemasParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(users)
+		writeJSON(w, http.StatusOK, rows)
 	})
 
-	// Get single user
-	mux.HandleFunc("GET /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.Atoi(r.PathValue("id"))
+	mux.HandleFunc("GET /api/cinemas/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
 		if err != nil {
-			http.Error(w, "Invalid ID", http.StatusBadRequest)
+			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
 		}
-
-		user, err := queries.GetUser(r.Context(), int32(id))
+		row, err := q.GetCinema(r.Context(), id)
 		if err == pgx.ErrNoRows {
-			http.Error(w, "User not found", http.StatusNotFound)
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
+		writeJSON(w, http.StatusOK, row)
 	})
 
-	// Create user
-	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/cinemas", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Name     string `json:"name"`
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Name                string `json:"name"`
+			Address             string `json:"address"`
+			LocationCoordinates string `json:"location_coordinates"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-
-		// Type-safe parameters - compiler verifies this!
-		user, err := queries.CreateUser(r.Context(), db.CreateUserParams{
-			Name:         req.Name,
-			Email:        req.Email,
-			PasswordHash: hashPassword(req.Password), // You'd use bcrypt
+		row, err := q.CreateCinema(r.Context(), db.CreateCinemaParams{
+			Name:                req.Name,
+			Address:             req.Address,
+			LocationCoordinates: pgtype.Text{String: req.LocationCoordinates, Valid: req.LocationCoordinates != ""},
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
+		writeJSON(w, http.StatusCreated, row)
 	})
 
-	// Update user
-	mux.HandleFunc("PATCH /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, _ := strconv.Atoi(r.PathValue("id"))
-
-		var req struct {
-			Name  *string `json:"name"`
-			Email *string `json:"email"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+	mux.HandleFunc("PUT /api/cinemas/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
 		}
-
-		// Build update params with nullable fields
-		params := db.UpdateUserParams{ID: int32(id)}
-		if req.Name != nil {
-			params.Name = db.NullString(*req.Name)
+		var req struct {
+			Name                string `json:"name"`
+			Address             string `json:"address"`
+			LocationCoordinates string `json:"location_coordinates"`
 		}
-		if req.Email != nil {
-			params.Email = db.NullString(*req.Email)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
 		}
-
-		user, err := queries.UpdateUser(r.Context(), params)
+		row, err := q.UpdateCinema(r.Context(), db.UpdateCinemaParams{
+			CinemaID:            id,
+			Name:                req.Name,
+			Address:             req.Address,
+			LocationCoordinates: pgtype.Text{String: req.LocationCoordinates, Valid: req.LocationCoordinates != ""},
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
+		writeJSON(w, http.StatusOK, row)
 	})
 
-	// Delete user
-	mux.HandleFunc("DELETE /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, _ := strconv.Atoi(r.PathValue("id"))
-		if err := queries.DeleteUser(r.Context(), int32(id)); err != nil {
+	mux.HandleFunc("DELETE /api/cinemas/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteCinema(r.Context(), id); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -191,144 +184,564 @@ func main() {
 	})
 
 	// =========================================================================
-	// Post endpoints with JOINs
+	// Movies
 	// =========================================================================
 
-	// List posts with author info (demonstrates JOIN queries)
-	mux.HandleFunc("GET /api/posts", func(w http.ResponseWriter, r *http.Request) {
-		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		if limit <= 0 {
-			limit = 20
-		}
-		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-		// Returns ListPostsWithAuthorsRow - includes author_id, author_name
-		posts, err := queries.ListPostsWithAuthors(r.Context(), int32(limit), int32(offset))
+	mux.HandleFunc("GET /api/movies", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListMovies(r.Context(), db.ListMoviesParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(posts)
+		writeJSON(w, http.StatusOK, rows)
 	})
 
-	// Get post with full author details
-	mux.HandleFunc("GET /api/posts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, _ := strconv.Atoi(r.PathValue("id"))
-
-		// Returns GetPostWithAuthorRow - different struct than ListPosts!
-		post, err := queries.GetPostWithAuthor(r.Context(), int32(id))
+	mux.HandleFunc("GET /api/movies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		row, err := q.GetMovie(r.Context(), id)
 		if err == pgx.ErrNoRows {
-			http.Error(w, "Post not found", http.StatusNotFound)
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(post)
+		writeJSON(w, http.StatusOK, row)
 	})
 
-	// Create post
-	mux.HandleFunc("POST /api/posts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/movies", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			UserID    int32  `json:"user_id"`
-			Title     string `json:"title"`
-			Content   string `json:"content"`
-			Published bool   `json:"published"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Genre       []string `json:"genre"`
+			TrailerURL  string   `json:"trailer_url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-
-		post, err := queries.CreatePost(r.Context(), db.CreatePostParams{
-			UserID:    req.UserID,
-			Title:     req.Title,
-			Content:   db.NullString(req.Content),
-			Published: db.NullBool(req.Published),
+		row, err := q.CreateMovie(r.Context(), db.CreateMovieParams{
+			Title:       req.Title,
+			Description: pgtype.Text{String: req.Description, Valid: req.Description != ""},
+			Genre:       req.Genre,
+			TrailerUrl:  pgtype.Text{String: req.TrailerURL, Valid: req.TrailerURL != ""},
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		writeJSON(w, http.StatusCreated, row)
+	})
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(post)
+	mux.HandleFunc("PUT /api/movies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Genre       []string `json:"genre"`
+			TrailerURL  string   `json:"trailer_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		row, err := q.UpdateMovie(r.Context(), db.UpdateMovieParams{
+			MovieID:     id,
+			Title:       req.Title,
+			Description: pgtype.Text{String: req.Description, Valid: req.Description != ""},
+			Genre:       req.Genre,
+			TrailerUrl:  pgtype.Text{String: req.TrailerURL, Valid: req.TrailerURL != ""},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("DELETE /api/movies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteMovie(r.Context(), id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// =========================================================================
-	// Transaction example
+	// Showtimes
 	// =========================================================================
 
-	// Create user with initial post (transaction)
-	mux.HandleFunc("POST /api/users/with-post", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Name      string `json:"name"`
-			Email     string `json:"email"`
-			Password  string `json:"password"`
-			PostTitle string `json:"post_title"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Start transaction
-		tx, err := pool.Begin(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer tx.Rollback(r.Context())
-
-		// Use queries with transaction
-		qtx := queries.WithTx(tx)
-
-		// Create user
-		user, err := qtx.CreateUser(r.Context(), db.CreateUserParams{
-			Name:         req.Name,
-			Email:        req.Email,
-			PasswordHash: hashPassword(req.Password),
+	mux.HandleFunc("GET /api/showtimes", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListShowtimes(r.Context(), db.ListShowtimesParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// Create post
-		post, err := qtx.CreatePost(r.Context(), db.CreatePostParams{
-			UserID:    user.ID,
-			Title:     req.PostTitle,
-			Published: db.NullBool(true),
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Commit transaction
-		if err := tx.Commit(r.Context()); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"user": user,
-			"post": post,
-		})
+		writeJSON(w, http.StatusOK, rows)
 	})
 
-	// Serve static files
-	mux.Handle("GET /", http.FileServer(http.Dir("./static")))
+	mux.HandleFunc("GET /api/showtimes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		row, err := q.GetShowtime(r.Context(), id)
+		if err == pgx.ErrNoRows {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
 
-	// Start server
+	mux.HandleFunc("POST /api/showtimes", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			MovieID   int32   `json:"movie_id"`
+			CinemaID  int32   `json:"cinema_id"`
+			StartTime string  `json:"start_time"`
+			Price     float64 `json:"price"`
+			Duration  int32   `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		t, err := time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			http.Error(w, "invalid start_time, use RFC3339", http.StatusBadRequest)
+			return
+		}
+		var price pgtype.Numeric
+		if err := price.Scan(strconv.FormatFloat(req.Price, 'f', 2, 64)); err != nil {
+			http.Error(w, "invalid price", http.StatusBadRequest)
+			return
+		}
+		row, err := q.CreateShowtime(r.Context(), db.CreateShowtimeParams{
+			MovieID:   req.MovieID,
+			CinemaID:  req.CinemaID,
+			StartTime: pgtype.Timestamptz{Time: t, Valid: true},
+			Price:     price,
+			Duration:  req.Duration,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusCreated, row)
+	})
+
+	mux.HandleFunc("PUT /api/showtimes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			MovieID   int32   `json:"movie_id"`
+			CinemaID  int32   `json:"cinema_id"`
+			StartTime string  `json:"start_time"`
+			Price     float64 `json:"price"`
+			Duration  int32   `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		t, err := time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			http.Error(w, "invalid start_time, use RFC3339", http.StatusBadRequest)
+			return
+		}
+		var price pgtype.Numeric
+		if err := price.Scan(strconv.FormatFloat(req.Price, 'f', 2, 64)); err != nil {
+			http.Error(w, "invalid price", http.StatusBadRequest)
+			return
+		}
+		row, err := q.UpdateShowtime(r.Context(), db.UpdateShowtimeParams{
+			ShowtimeID: id,
+			MovieID:    req.MovieID,
+			CinemaID:   req.CinemaID,
+			StartTime:  pgtype.Timestamptz{Time: t, Valid: true},
+			Price:      price,
+			Duration:   req.Duration,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("DELETE /api/showtimes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteShowtime(r.Context(), id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// =========================================================================
+	// Tickets
+	// =========================================================================
+
+	mux.HandleFunc("GET /api/tickets", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListTickets(r.Context(), db.ListTicketsParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /api/tickets/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var ticketID pgtype.UUID
+		if err := ticketID.Scan(r.PathValue("id")); err != nil {
+			http.Error(w, "invalid uuid", http.StatusBadRequest)
+			return
+		}
+		row, err := q.GetTicket(r.Context(), ticketID)
+		if err == pgx.ErrNoRows {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("POST /api/tickets", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ShowtimeID    int32  `json:"showtime_id"`
+			UserID        int32  `json:"user_id"`
+			SeatNumber    string `json:"seat_number"`
+			PaymentStatus string `json:"payment_status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if req.PaymentStatus == "" {
+			req.PaymentStatus = "pending"
+		}
+		row, err := q.CreateTicket(r.Context(), db.CreateTicketParams{
+			ShowtimeID:    req.ShowtimeID,
+			UserID:        req.UserID,
+			SeatNumber:    req.SeatNumber,
+			PaymentStatus: pgtype.Text{String: req.PaymentStatus, Valid: true},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusCreated, row)
+	})
+
+	mux.HandleFunc("PATCH /api/tickets/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var ticketID pgtype.UUID
+		if err := ticketID.Scan(r.PathValue("id")); err != nil {
+			http.Error(w, "invalid uuid", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			PaymentStatus string `json:"payment_status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		row, err := q.UpdateTicketStatus(r.Context(), db.UpdateTicketStatusParams{
+			TicketID:      ticketID,
+			PaymentStatus: pgtype.Text{String: req.PaymentStatus, Valid: true},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("DELETE /api/tickets/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var ticketID pgtype.UUID
+		if err := ticketID.Scan(r.PathValue("id")); err != nil {
+			http.Error(w, "invalid uuid", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteTicket(r.Context(), ticketID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// =========================================================================
+	// Users
+	// =========================================================================
+
+	mux.HandleFunc("GET /api/users", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListUsers(r.Context(), db.ListUsersParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		row, err := q.GetUser(r.Context(), id)
+		if err == pgx.ErrNoRows {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Email           string `json:"email"`
+			Password        string `json:"password"`
+			Phone           string `json:"phone"`
+			FullName        string `json:"full_name"`
+			PermissionLevel int32  `json:"permission_level"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if req.PermissionLevel == 0 {
+			req.PermissionLevel = 2
+		}
+		row, err := q.CreateUser(r.Context(), db.CreateUserParams{
+			Email:           req.Email,
+			PasswordHash:    hashPassword(req.Password),
+			Phone:           pgtype.Text{String: req.Phone, Valid: req.Phone != ""},
+			FullName:        req.FullName,
+			PermissionLevel: pgtype.Int4{Int32: req.PermissionLevel, Valid: true},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusCreated, row)
+	})
+
+	mux.HandleFunc("PUT /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			Email           string `json:"email"`
+			Phone           string `json:"phone"`
+			FullName        string `json:"full_name"`
+			IsBlocked       bool   `json:"is_blocked"`
+			PermissionLevel int32  `json:"permission_level"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		row, err := q.UpdateUser(r.Context(), db.UpdateUserParams{
+			UserID:          id,
+			Email:           req.Email,
+			Phone:           pgtype.Text{String: req.Phone, Valid: req.Phone != ""},
+			FullName:        req.FullName,
+			IsBlocked:       pgtype.Bool{Bool: req.IsBlocked, Valid: true},
+			PermissionLevel: pgtype.Int4{Int32: req.PermissionLevel, Valid: true},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("DELETE /api/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteUser(r.Context(), id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// =========================================================================
+	// Reviews
+	// =========================================================================
+
+	mux.HandleFunc("GET /api/movies/{id}/reviews", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		rows, err := q.ListReviewsByMovie(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /api/reviews", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListReviews(r.Context(), db.ListReviewsParams{
+			Limit:  queryInt(r, "limit", 20),
+			Offset: queryInt(r, "offset", 0),
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /api/reviews/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		row, err := q.GetReview(r.Context(), id)
+		if err == pgx.ErrNoRows {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("POST /api/reviews", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			UserID  int32  `json:"user_id"`
+			MovieID int32  `json:"movie_id"`
+			Rating  int32  `json:"rating"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		row, err := q.CreateReview(r.Context(), db.CreateReviewParams{
+			UserID:  req.UserID,
+			MovieID: req.MovieID,
+			Rating:  pgtype.Int4{Int32: req.Rating, Valid: req.Rating > 0},
+			Content: pgtype.Text{String: req.Content, Valid: req.Content != ""},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusCreated, row)
+	})
+
+	mux.HandleFunc("PUT /api/reviews/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			Rating  int32  `json:"rating"`
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		row, err := q.UpdateReview(r.Context(), db.UpdateReviewParams{
+			ReviewID: id,
+			Rating:   pgtype.Int4{Int32: req.Rating, Valid: req.Rating > 0},
+			Content:  pgtype.Text{String: req.Content, Valid: req.Content != ""},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, row)
+	})
+
+	mux.HandleFunc("DELETE /api/reviews/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if err := q.DeleteReview(r.Context(), id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// =========================================================================
+	// Permissions
+	// =========================================================================
+
+	mux.HandleFunc("GET /api/permissions", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := q.ListPermissions(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	// Static files (React build)
+	mux.Handle("/", http.FileServer(http.Dir("./static")))
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -342,24 +755,22 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("🚀 Server running on http://localhost:%s", port)
+		log.Printf("Server running on http://localhost:%s", port)
 		if err := server.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	server.Shutdown(ctx)
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutCancel()
+	server.Shutdown(shutCtx)
 	log.Println("Server stopped")
 }
 
-// Placeholder - use bcrypt in production
 func hashPassword(password string) string {
 	return "hashed_" + password
 }
