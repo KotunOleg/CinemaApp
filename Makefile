@@ -20,6 +20,9 @@ verify: ## Verify sqlc configuration
 run: ## Run the server
 	go run ./cmd/server/main.go
 
+dev: ## Build frontend and run server
+	cd frontend && npm run build && cd .. && go run ./cmd/server/main.go
+
 build: ## Build binary
 	go build -o bin/server ./cmd/server
 
