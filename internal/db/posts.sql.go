@@ -127,6 +127,58 @@ func (q *Queries) ListReviews(ctx context.Context, arg ListReviewsParams) ([]Lis
 	return items, nil
 }
 
+const listReviewsByMovie = `-- name: ListReviewsByMovie :many
+SELECT
+    r.review_id, r.user_id, r.movie_id, r.rating, r.content, r.created_at,
+    u.full_name AS user_name,
+    m.title AS movie_title
+FROM reviews r
+JOIN users u ON u.user_id = r.user_id
+JOIN movies m ON m.movie_id = r.movie_id
+WHERE r.movie_id = $1
+ORDER BY r.created_at DESC
+`
+
+type ListReviewsByMovieRow struct {
+	ReviewID   int32              `json:"review_id"`
+	UserID     int32              `json:"user_id"`
+	MovieID    int32              `json:"movie_id"`
+	Rating     pgtype.Int4        `json:"rating"`
+	Content    pgtype.Text        `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UserName   string             `json:"user_name"`
+	MovieTitle string             `json:"movie_title"`
+}
+
+func (q *Queries) ListReviewsByMovie(ctx context.Context, movieID int32) ([]ListReviewsByMovieRow, error) {
+	rows, err := q.db.Query(ctx, listReviewsByMovie, movieID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReviewsByMovieRow{}
+	for rows.Next() {
+		var i ListReviewsByMovieRow
+		if err := rows.Scan(
+			&i.ReviewID,
+			&i.UserID,
+			&i.MovieID,
+			&i.Rating,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UserName,
+			&i.MovieTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateReview = `-- name: UpdateReview :one
 UPDATE reviews
 SET rating = $2, content = $3

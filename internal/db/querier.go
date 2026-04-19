@@ -35,6 +35,7 @@ type Querier interface {
 	ListMovies(ctx context.Context, arg ListMoviesParams) ([]Movie, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListReviews(ctx context.Context, arg ListReviewsParams) ([]ListReviewsRow, error)
+	ListReviewsByMovie(ctx context.Context, movieID int32) ([]ListReviewsByMovieRow, error)
 	ListShowtimes(ctx context.Context, arg ListShowtimesParams) ([]ListShowtimesRow, error)
 	ListTickets(ctx context.Context, arg ListTicketsParams) ([]ListTicketsRow, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
