@@ -25,6 +25,7 @@ export default function EntityPage({
   remove,
   fields,
   defaultValues = {},
+  extraActions,
 }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -104,9 +105,12 @@ export default function EntityPage({
     <div className="p-4">
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h4 className="mb-0">{title}</h4>
-        <button className="btn btn-primary btn-sm" onClick={openCreate}>
-          <i className="bi bi-plus-lg me-1" /> Add
-        </button>
+        <div className="d-flex gap-2 align-items-center">
+          {extraActions}
+          <button className="btn btn-primary btn-sm" onClick={openCreate}>
+            <i className="bi bi-plus-lg me-1" /> Add
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
