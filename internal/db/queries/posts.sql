@@ -23,5 +23,16 @@ SET rating = $2, content = $3
 WHERE review_id = $1
 RETURNING *;
 
+-- name: ListReviewsByMovie :many
+SELECT
+    r.*,
+    u.full_name AS user_name,
+    m.title AS movie_title
+FROM reviews r
+JOIN users u ON u.user_id = r.user_id
+JOIN movies m ON m.movie_id = r.movie_id
+WHERE r.movie_id = $1
+ORDER BY r.created_at DESC;
+
 -- name: DeleteReview :exec
 DELETE FROM reviews WHERE review_id = $1;
