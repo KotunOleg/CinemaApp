@@ -2,6 +2,59 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { api } from '../../api/client'
 
+const RULES = [
+  { id: 'len',     label: 'At least 8 characters',       test: (p) => p.length >= 8 },
+  { id: 'upper',   label: 'Uppercase letter (A–Z)',       test: (p) => /[A-Z]/.test(p) },
+  { id: 'lower',   label: 'Lowercase letter (a–z)',       test: (p) => /[a-z]/.test(p) },
+  { id: 'digit',   label: 'Number (0–9)',                 test: (p) => /\d/.test(p) },
+  { id: 'special', label: 'Special character (!@#$…)',    test: (p) => /[^A-Za-z0-9]/.test(p) },
+]
+
+function getStrength(password) {
+  if (!password) return null
+  const passed = RULES.filter((r) => r.test(password)).length
+  if (passed <= 2) return { level: 1, label: 'Weak',   color: 'danger' }
+  if (passed === 3) return { level: 2, label: 'Fair',   color: 'warning' }
+  if (passed === 4) return { level: 3, label: 'Good',   color: 'info' }
+  return            { level: 4, label: 'Strong', color: 'success' }
+}
+
+function PasswordStrength({ password }) {
+  const strength = getStrength(password)
+  if (!strength) return null
+  return (
+    <div className="mt-2">
+      <div className="d-flex gap-1 mb-1">
+        {[1, 2, 3, 4].map((n) => (
+          <div
+            key={n}
+            className="flex-grow-1 rounded"
+            style={{
+              height: 5,
+              backgroundColor: n <= strength.level ? `var(--bs-${strength.color})` : '#dee2e6',
+              transition: 'background-color 0.2s',
+            }}
+          />
+        ))}
+        <small className={`text-${strength.color} fw-semibold ms-1`} style={{ minWidth: 48 }}>
+          {strength.label}
+        </small>
+      </div>
+      <ul className="list-unstyled mb-0 mt-1" style={{ fontSize: 12 }}>
+        {RULES.map((r) => {
+          const ok = r.test(password)
+          return (
+            <li key={r.id} className={ok ? 'text-success' : 'text-muted'}>
+              <i className={`bi bi-${ok ? 'check-circle-fill' : 'circle'} me-1`} />
+              {r.label}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function formatTime(ts) {
   if (!ts) return '—'
   try { return new Date(ts).toLocaleString('uk-UA') } catch { return String(ts) }
@@ -141,6 +194,10 @@ function SettingsTab() {
   const [nameLoading, setNameLoading] = useState(false)
   const [passLoading, setPassLoading] = useState(false)
 
+  const passStrength = getStrength(passForm.password)
+  const passwordsMatch = passForm.password === passForm.confirm
+  const canChangePass = passStrength && passStrength.level >= 2 && passForm.confirm && passwordsMatch
+
   const handleName = async (e) => {
     e.preventDefault()
     setNameMsg(null)
@@ -161,14 +218,7 @@ function SettingsTab() {
   const handlePass = async (e) => {
     e.preventDefault()
     setPassMsg(null)
-    if (passForm.password !== passForm.confirm) {
-      setPassMsg({ type: 'danger', text: 'Passwords do not match' })
-      return
-    }
-    if (passForm.password.length < 6) {
-      setPassMsg({ type: 'danger', text: 'Password must be at least 6 characters' })
-      return
-    }
+    if (!canChangePass) return
     setPassLoading(true)
     try {
       await api.put('/api/profile', { password: passForm.password })
@@ -221,21 +271,22 @@ function SettingsTab() {
                 onChange={(e) => setPassForm({ ...passForm, password: e.target.value })}
                 required
               />
+              <PasswordStrength password={passForm.password} />
             </div>
             <div className="mb-3">
               <label className="form-label">Confirm Password</label>
               <input
                 type="password"
-                className={`form-control ${passForm.confirm && passForm.password !== passForm.confirm ? 'is-invalid' : ''}`}
+                className={`form-control ${passForm.confirm && !passwordsMatch ? 'is-invalid' : ''}`}
                 value={passForm.confirm}
                 onChange={(e) => setPassForm({ ...passForm, confirm: e.target.value })}
                 required
               />
-              {passForm.confirm && passForm.password !== passForm.confirm && (
+              {passForm.confirm && !passwordsMatch && (
                 <div className="invalid-feedback">Passwords do not match</div>
               )}
             </div>
-            <button type="submit" className="btn btn-warning" disabled={passLoading}>
+            <button type="submit" className="btn btn-warning" disabled={passLoading || !canChangePass}>
               {passLoading ? 'Saving…' : 'Change Password'}
             </button>
           </form>

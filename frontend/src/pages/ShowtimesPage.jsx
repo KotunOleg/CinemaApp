@@ -31,12 +31,18 @@ export default function ShowtimesPage() {
     )
   }, [])
 
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(0, 0, 0, 0)
+  const pad = (n) => String(n).padStart(2, '0')
+  const tomorrowMin = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T00:00`
+
   const fields = [
     { key: 'movie_id', label: 'Movie', type: 'select', numericValue: true, required: true, options: movieOptions },
     { key: 'cinema_id', label: 'Cinema', type: 'select', numericValue: true, required: true, options: cinemaOptions },
-    { key: 'start_time', label: 'Start Time', type: 'datetime-local', required: true },
+    { key: 'start_time', label: 'Start Time', type: 'datetime-local', required: true, min: tomorrowMin },
     { key: 'price', label: 'Price', type: 'number', step: '0.01', required: true },
-    { key: 'duration', label: 'Duration (minutes)', type: 'number', required: true },
+    { key: 'duration', label: 'Duration (minutes)', type: 'number', required: true, min: 10 },
   ]
 
   const fetchAll = useCallback(() => api.get('/api/showtimes?limit=100'), [])

@@ -42,6 +42,70 @@ function StarPicker({ value, onChange }) {
   )
 }
 
+const ROWS = 'ABCDEFGHIJ'.split('')
+const COLS = Array.from({ length: 20 }, (_, i) => i + 1)
+
+function SeatPicker({ booked, selected, onSelect }) {
+  return (
+    <div>
+      <div className="text-center mb-3">
+        <div style={{ background: '#adb5bd', height: 6, borderRadius: 3, width: '90%', margin: '0 auto 4px' }} />
+        <small className="text-muted" style={{ fontSize: 11 }}>SCREEN</small>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        {ROWS.map((row) => (
+          <div key={row} className="d-flex align-items-center mb-1" style={{ gap: 3 }}>
+            <span style={{ width: 14, fontSize: 11, color: '#6c757d', flexShrink: 0 }}>{row}</span>
+            {COLS.map((col) => {
+              const seatId = `${row}${col}`
+              const isBooked = booked.includes(seatId)
+              const isSelected = selected.includes(seatId)
+              return (
+                <button
+                  key={col}
+                  type="button"
+                  disabled={isBooked}
+                  onClick={() => onSelect(seatId)}
+                  title={seatId}
+                  style={{
+                    width: 26,
+                    height: 24,
+                    fontSize: 9,
+                    padding: 0,
+                    borderRadius: 3,
+                    border: 'none',
+                    cursor: isBooked ? 'not-allowed' : 'pointer',
+                    backgroundColor: isBooked ? '#dc3545' : isSelected ? '#ffc107' : '#198754',
+                    color: '#fff',
+                    opacity: isBooked ? 0.55 : 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  {col}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="d-flex gap-3 mt-2" style={{ fontSize: 11 }}>
+        <span className="d-flex align-items-center gap-1">
+          <span style={{ display: 'inline-block', width: 12, height: 12, background: '#198754', borderRadius: 2 }} />
+          Available
+        </span>
+        <span className="d-flex align-items-center gap-1">
+          <span style={{ display: 'inline-block', width: 12, height: 12, background: '#dc3545', borderRadius: 2 }} />
+          Booked
+        </span>
+        <span className="d-flex align-items-center gap-1">
+          <span style={{ display: 'inline-block', width: 12, height: 12, background: '#ffc107', borderRadius: 2 }} />
+          Selected
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export default function MoviePage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -53,7 +117,8 @@ export default function MoviePage() {
 
   // Booking
   const [booking, setBooking] = useState(null)
-  const [bookForm, setBookForm] = useState({ seat_number: '' })
+  const [bookedSeats, setBookedSeats] = useState([])
+  const [selectedSeats, setSelectedSeats] = useState([])
   const [bookSubmitting, setBookSubmitting] = useState(false)
   const [bookSuccess, setBookSuccess] = useState(null)
   const [bookError, setBookError] = useState(null)
@@ -78,20 +143,34 @@ export default function MoviePage() {
     }).finally(() => setLoading(false))
   }, [id])
 
+  useEffect(() => {
+    if (!booking) { setBookedSeats([]); setSelectedSeats([]); return }
+    api.get(`/api/showtimes/${booking.showtime_id}/seats`)
+      .then((seats) => setBookedSeats(seats || []))
+      .catch(() => setBookedSeats([]))
+  }, [booking])
+
+  const toggleSeat = (seatId) =>
+    setSelectedSeats((prev) =>
+      prev.includes(seatId) ? prev.filter((s) => s !== seatId) : [...prev, seatId]
+    )
+
   const handleBook = async (e) => {
     e.preventDefault()
     setBookSubmitting(true)
     setBookError(null)
     try {
-      await api.post('/api/tickets', {
-        showtime_id: booking.showtime_id,
-        user_id: user?.user_id,
-        seat_number: bookForm.seat_number,
-        payment_status: 'pending',
-      })
-      setBookSuccess(`Ticket booked! Seat ${bookForm.seat_number} — ${formatTime(booking.start_time)}`)
+      for (const seat of selectedSeats) {
+        await api.post('/api/tickets', {
+          showtime_id: booking.showtime_id,
+          user_id: user?.user_id,
+          seat_number: seat,
+          payment_status: 'pending',
+        })
+      }
+      setBookSuccess(`Booked ${selectedSeats.length} ticket(s): ${selectedSeats.join(', ')} — ${formatTime(booking.start_time)}`)
       setBooking(null)
-      setBookForm({ seat_number: '' })
+      setSelectedSeats([])
     } catch (e) {
       setBookError(e.message)
     } finally {
@@ -261,7 +340,7 @@ export default function MoviePage() {
       {/* Booking modal */}
       {booking && (
         <div className="modal show d-block" tabIndex="-1" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content">
               <form onSubmit={handleBook}>
                 <div className="modal-header">
@@ -275,22 +354,29 @@ export default function MoviePage() {
                   </p>
                   {bookError && <div className="alert alert-danger py-2">{bookError}</div>}
                   <div className="mb-3">
-                    <label className="form-label fw-semibold">Seat Number</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. A12"
-                      value={bookForm.seat_number}
-                      onChange={(e) => setBookForm({ ...bookForm, seat_number: e.target.value })}
-                      required
+                    <label className="form-label fw-semibold">Select Seats</label>
+                    <SeatPicker
+                      booked={bookedSeats}
+                      selected={selectedSeats}
+                      onSelect={toggleSeat}
                     />
                   </div>
-                  <p className="fw-bold text-success">Total: {booking.price} ₴</p>
+                  {selectedSeats.length > 0 && (
+                    <p className="mb-1">
+                      Selected ({selectedSeats.length}): <strong>{selectedSeats.join(', ')}</strong>
+                    </p>
+                  )}
+                  <p className="fw-bold text-success mb-0">
+                    Total: {(Number(booking.price) * selectedSeats.length).toFixed(2)} ₴
+                    {selectedSeats.length > 1 && (
+                      <span className="text-muted fw-normal small ms-2">({booking.price} ₴ × {selectedSeats.length})</span>
+                    )}
+                  </p>
                 </div>
                 <div className="modal-footer">
                   <button type="button" className="btn btn-secondary" onClick={() => setBooking(null)}>Cancel</button>
-                  <button type="submit" className="btn btn-warning" disabled={bookSubmitting}>
-                    {bookSubmitting ? 'Booking…' : 'Confirm Booking'}
+                  <button type="submit" className="btn btn-warning" disabled={bookSubmitting || selectedSeats.length === 0}>
+                    {bookSubmitting ? 'Booking…' : `Confirm Booking${selectedSeats.length > 1 ? ` (${selectedSeats.length})` : ''}`}
                   </button>
                 </div>
               </form>

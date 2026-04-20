@@ -52,9 +52,7 @@ export default function MoviesPage() {
     const form = new FormData()
     form.append('file', file)
     try {
-      const res = await fetch('/api/movies/import', { method: 'POST', body: form })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data)
+      const data = await api.postForm('/api/movies/import', form)
       alert(`Imported ${data.imported} movie(s) successfully.`)
       window.location.reload()
     } catch (err) {

@@ -616,6 +616,30 @@ func main() {
 		writeJSON(w, http.StatusOK, row)
 	})
 
+	mux.HandleFunc("GET /api/showtimes/{id}/seats", func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathInt(r, "id")
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		rows, err := pool.Query(r.Context(), `SELECT seat_number FROM tickets WHERE showtime_id = $1`, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		seats := []string{}
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			seats = append(seats, s)
+		}
+		writeJSON(w, http.StatusOK, seats)
+	})
+
 	mux.HandleFunc("POST /api/showtimes", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			MovieID   int32   `json:"movie_id"`
@@ -628,9 +652,33 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if req.Duration < 10 {
+			http.Error(w, "duration must be at least 10 minutes", http.StatusBadRequest)
+			return
+		}
 		t, err := time.Parse(time.RFC3339, req.StartTime)
 		if err != nil {
 			http.Error(w, "invalid start_time, use RFC3339", http.StatusBadRequest)
+			return
+		}
+		todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
+		if !t.UTC().Truncate(24 * time.Hour).After(todayUTC) {
+			http.Error(w, "showtime date must be tomorrow or later", http.StatusBadRequest)
+			return
+		}
+		var count int
+		err = pool.QueryRow(r.Context(), `
+			SELECT COUNT(*) FROM showtimes
+			WHERE cinema_id = $1
+			  AND start_time < $2::timestamptz + ($3 * interval '1 minute')
+			  AND start_time + (duration * interval '1 minute') > $2::timestamptz
+		`, req.CinemaID, t, req.Duration).Scan(&count)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if count > 0 {
+			http.Error(w, "showtime overlaps with an existing session in this cinema", http.StatusConflict)
 			return
 		}
 		var price pgtype.Numeric
@@ -669,9 +717,34 @@ func main() {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if req.Duration < 10 {
+			http.Error(w, "duration must be at least 10 minutes", http.StatusBadRequest)
+			return
+		}
 		t, err := time.Parse(time.RFC3339, req.StartTime)
 		if err != nil {
 			http.Error(w, "invalid start_time, use RFC3339", http.StatusBadRequest)
+			return
+		}
+		todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
+		if !t.UTC().Truncate(24 * time.Hour).After(todayUTC) {
+			http.Error(w, "showtime date must be tomorrow or later", http.StatusBadRequest)
+			return
+		}
+		var count int
+		err = pool.QueryRow(r.Context(), `
+			SELECT COUNT(*) FROM showtimes
+			WHERE cinema_id = $1
+			  AND showtime_id != $2
+			  AND start_time < $3::timestamptz + ($4 * interval '1 minute')
+			  AND start_time + (duration * interval '1 minute') > $3::timestamptz
+		`, req.CinemaID, id, t, req.Duration).Scan(&count)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if count > 0 {
+			http.Error(w, "showtime overlaps with an existing session in this cinema", http.StatusConflict)
 			return
 		}
 		var price pgtype.Numeric
@@ -754,6 +827,18 @@ func main() {
 		}
 		if req.PaymentStatus == "" {
 			req.PaymentStatus = "pending"
+		}
+		var taken bool
+		if err := pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM tickets WHERE showtime_id = $1 AND seat_number = $2)`,
+			req.ShowtimeID, req.SeatNumber,
+		).Scan(&taken); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if taken {
+			http.Error(w, "seat is already booked", http.StatusConflict)
+			return
 		}
 		row, err := q.CreateTicket(r.Context(), db.CreateTicketParams{
 			ShowtimeID:    req.ShowtimeID,

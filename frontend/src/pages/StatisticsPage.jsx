@@ -4,15 +4,14 @@ import {
   CategoryScale,
   LinearScale,
   BarElement,
-  ArcElement,
   Title,
   Tooltip,
   Legend,
 } from 'chart.js'
-import { Bar, Pie } from 'react-chartjs-2'
+import { Bar } from 'react-chartjs-2'
 import { api } from '../api/client'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const PALETTE = [
   '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
@@ -74,16 +73,6 @@ export default function StatisticsPage() {
     ],
   }
 
-  const pieData = {
-    labels: byGenre.map((r) => r.genre),
-    datasets: [
-      {
-        data: byGenre.map((r) => r.count),
-        backgroundColor: byGenre.map((_, i) => PALETTE[i % PALETTE.length]),
-      },
-    ],
-  }
-
   return (
     <div className="p-4">
       <h4 className="fw-bold mb-4">
@@ -92,8 +81,8 @@ export default function StatisticsPage() {
       </h4>
 
       <div className="row g-4">
-        <div className="col-12 col-xl-7">
-          <div className="card shadow-sm h-100">
+        <div className="col-12">
+          <div className="card shadow-sm">
             <div className="card-header bg-white fw-semibold">Movies by Genre</div>
             <div className="card-body">
               {byGenre.length === 0 ? (
@@ -107,21 +96,6 @@ export default function StatisticsPage() {
                     scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
                   }}
                 />
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="col-12 col-xl-5">
-          <div className="card shadow-sm h-100">
-            <div className="card-header bg-white fw-semibold">Genre Distribution</div>
-            <div className="card-body d-flex justify-content-center align-items-center">
-              {byGenre.length === 0 ? (
-                <p className="text-muted">No genre data available.</p>
-              ) : (
-                <div style={{ maxWidth: 320, width: '100%' }}>
-                  <Pie data={pieData} options={{ responsive: true }} />
-                </div>
               )}
             </div>
           </div>
