@@ -55,6 +55,7 @@ function PasswordStrength({ password }) {
   )
 }
 
+
 function formatTime(ts) {
   if (!ts) return '—'
   try { return new Date(ts).toLocaleString('uk-UA') } catch { return String(ts) }
@@ -193,10 +194,12 @@ function SettingsTab() {
   const [passMsg, setPassMsg] = useState(null)
   const [nameLoading, setNameLoading] = useState(false)
   const [passLoading, setPassLoading] = useState(false)
+  const [showPass, setShowPass] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const passStrength = getStrength(passForm.password)
   const passwordsMatch = passForm.password === passForm.confirm
-  const canChangePass = passStrength && passStrength.level >= 2 && passForm.confirm && passwordsMatch
+  const canChangePass = passStrength && passStrength.level === 4 && passForm.confirm && passwordsMatch
 
   const handleName = async (e) => {
     e.preventDefault()
@@ -264,31 +267,93 @@ function SettingsTab() {
           <form onSubmit={handlePass}>
             <div className="mb-3">
               <label className="form-label">New Password</label>
-              <input
-                type="password"
-                className="form-control"
-                value={passForm.password}
-                onChange={(e) => setPassForm({ ...passForm, password: e.target.value })}
-                required
-              />
-              <PasswordStrength password={passForm.password} />
+              <div className="input-group">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  className={`form-control ${passForm.password && (passStrength && passStrength.level === 4 ? 'is-valid' : 'is-invalid')}`}
+                  value={passForm.password}
+                  onChange={(e) => setPassForm({ ...passForm, password: e.target.value })}
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setShowPass((v) => !v)}
+                  tabIndex={-1}
+                >
+                  <i className={`bi bi-eye${showPass ? '-slash' : ''}`} />
+                </button>
+              </div>
+              <div className="mt-2" style={{ fontSize: 13 }}>
+                  {passStrength && (
+                    <div className="d-flex gap-1 mb-1 align-items-center">
+                      {[1, 2, 3, 4].map((n) => (
+                        <div
+                          key={n}
+                          className="flex-grow-1 rounded"
+                          style={{
+                            height: 5,
+                            backgroundColor: n <= passStrength.level ? `var(--bs-${passStrength.color})` : '#dee2e6',
+                            transition: 'background-color 0.2s',
+                          }}
+                        />
+                      ))}
+                      <small className={`text-${passStrength.color} fw-semibold ms-1`} style={{ minWidth: 48 }}>
+                        {passStrength.label}
+                      </small>
+                    </div>
+                  )}
+                  <ul className="list-unstyled mb-0 mt-1">
+                    {RULES.map((r) => {
+                      const ok = passForm.password && r.test(passForm.password)
+                      return (
+                        <li key={r.id} className={ok ? 'text-success' : 'text-muted'}>
+                          <i className={`bi bi-${ok ? 'check-circle-fill' : 'circle'} me-1`} />
+                          {r.label}
+                        </li>
+                      )
+                    })}
+                  </ul>
+              </div>
             </div>
             <div className="mb-3">
               <label className="form-label">Confirm Password</label>
-              <input
-                type="password"
-                className={`form-control ${passForm.confirm && !passwordsMatch ? 'is-invalid' : ''}`}
-                value={passForm.confirm}
-                onChange={(e) => setPassForm({ ...passForm, confirm: e.target.value })}
-                required
-              />
+              <div className="input-group">
+                <input
+                  type={showConfirm ? 'text' : 'password'}
+                  className={`form-control ${passForm.confirm && (passwordsMatch ? 'is-valid' : 'is-invalid')}`}
+                  value={passForm.confirm}
+                  onChange={(e) => setPassForm({ ...passForm, confirm: e.target.value })}
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setShowConfirm((v) => !v)}
+                  tabIndex={-1}
+                >
+                  <i className={`bi bi-eye${showConfirm ? '-slash' : ''}`} />
+                </button>
+              </div>
               {passForm.confirm && !passwordsMatch && (
-                <div className="invalid-feedback">Passwords do not match</div>
+                <div className="text-danger mt-1" style={{ fontSize: 13 }}>
+                  <i className="bi bi-x-circle me-1" />Passwords do not match
+                </div>
+              )}
+              {passForm.confirm && passwordsMatch && (
+                <div className="text-success mt-1" style={{ fontSize: 13 }}>
+                  <i className="bi bi-check-circle me-1" />Passwords match
+                </div>
               )}
             </div>
             <button type="submit" className="btn btn-warning" disabled={passLoading || !canChangePass}>
               {passLoading ? 'Saving…' : 'Change Password'}
             </button>
+            {passForm.password && !(passStrength && passStrength.level === 4) && (
+              <p className="text-danger mt-2 mb-0" style={{ fontSize: 13 }}>
+                Password must meet all requirements.
+              </p>
+            )}
           </form>
         </div>
       </div>

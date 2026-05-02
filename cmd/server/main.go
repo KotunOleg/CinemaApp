@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"io"
 	"net/url"
+	"regexp"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
@@ -139,6 +140,10 @@ func main() {
 		}
 		if req.Email == "" || req.Password == "" || req.FullName == "" {
 			http.Error(w, "email, password, full_name required", http.StatusBadRequest)
+			return
+		}
+		if err := validatePassword(req.Password); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		user, err := q.CreateUser(r.Context(), db.CreateUserParams{
@@ -300,6 +305,10 @@ func main() {
 			}
 		}
 		if req.Password != "" {
+			if err := validatePassword(req.Password); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			if _, err := pool.Exec(r.Context(),
 				`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2`,
 				hashPassword(req.Password), userID); err != nil {
@@ -1499,6 +1508,25 @@ func randomState() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func validatePassword(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	if !regexp.MustCompile(`[A-Z]`).MatchString(password) {
+		return fmt.Errorf("password must contain an uppercase letter")
+	}
+	if !regexp.MustCompile(`[a-z]`).MatchString(password) {
+		return fmt.Errorf("password must contain a lowercase letter")
+	}
+	if !regexp.MustCompile(`[0-9]`).MatchString(password) {
+		return fmt.Errorf("password must contain a digit")
+	}
+	if !regexp.MustCompile(`[^A-Za-z0-9]`).MatchString(password) {
+		return fmt.Errorf("password must contain a special character")
+	}
+	return nil
 }
 
 func hashPassword(password string) string {

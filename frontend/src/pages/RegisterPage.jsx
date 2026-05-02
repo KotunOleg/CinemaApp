@@ -67,7 +67,7 @@ export default function RegisterPage() {
 
   const strength = getStrength(form.password)
   const passwordsMatch = form.password === form.confirm
-  const canSubmit = strength && strength.level >= 2 && form.confirm && passwordsMatch
+  const canSubmit = strength && strength.level === 4 && form.confirm && passwordsMatch
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -132,7 +132,7 @@ export default function RegisterPage() {
               <div className="input-group">
                 <input
                   type={showPass ? 'text' : 'password'}
-                  className={`form-control ${form.password && (strength && strength.level >= 2 ? 'is-valid' : 'is-invalid')}`}
+                  className={`form-control ${form.password && (strength && strength.level === 4 ? 'is-valid' : 'is-invalid')}`}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   required
@@ -185,9 +185,9 @@ export default function RegisterPage() {
             >
               {loading ? 'Registering…' : 'Register'}
             </button>
-            {form.password && !(strength && strength.level >= 2) && (
+            {form.password && !(strength && strength.level === 4) && (
               <p className="text-danger text-center mt-2 mb-0" style={{ fontSize: 13 }}>
-                Password is too weak — please meet at least 3 requirements.
+                Password must meet all requirements.
               </p>
             )}
           </form>
